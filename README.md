@@ -30,6 +30,12 @@ pip install git+https://github.com/username/migrations-tool.git@v0.1.0
 uv sync --frozen --dev
 ```
 
+### testing
+```bash
+./test.sh
+pytest test
+```
+
 ### docker build
 ```bash
 docker build -t migrations-tool .
