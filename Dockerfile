@@ -33,4 +33,4 @@ RUN --mount=from=add-det,source=/usr/local/cargo/bin/add-det,target=/bin/add-det
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-ENTRYPOINT ["migrate"]
+ENTRYPOINT ["db-migrate"]

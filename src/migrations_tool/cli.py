@@ -152,7 +152,7 @@ def downgrade(
         f"Downgrade -> {filename}",
         len(files),
     )
-    show_list()
+    show_list(20)
 
 
 @app.command("list", help="show a list of all migrations")

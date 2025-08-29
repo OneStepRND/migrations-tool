@@ -60,12 +60,12 @@ class TestMigrationCommands:
 
     def invoke_command(self, command: list[str]):
         """Helper method to invoke CLI commands with common arguments."""
-        full_command = command + [
+        full_command = [
             "--database-url",
             self.sqlite_db_url,
             "--migrations-dir",
             str(self.temp_migrations_dir),
-        ]
+        ] + command
         return self.runner.invoke(app, full_command)
 
     def generate_migration(self, name: str = "test migration"):
