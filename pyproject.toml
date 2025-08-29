@@ -1,0 +1,29 @@
+[build-system]
+requires = ["uv_build>=0.7.3,<0.8.0"]
+build-backend = "uv_build"
+
+[project]
+name = "migrations-tool"
+version = "0.1.0"
+description = "database migration tool"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=45.0.5",
+    "pymysql>=1.1.1",
+    "rich>=14.0.0",
+    "sqlalchemy>=2.0.41",
+    "typer>=0.16.0",
+]
+
+[project.scripts]
+db-migrate = "migrations_tool.cli:main"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+
+[dependency-groups]
+dev = [
+    'pytest',
+    'ruff',
+    'pyright',
+]
