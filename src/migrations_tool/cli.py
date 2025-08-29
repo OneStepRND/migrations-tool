@@ -2,7 +2,8 @@ import logging
 import signal
 import sys
 from collections.abc import Iterable
-from sqlalchemy.exc import ArgumentError, OperationalError
+from typing import TypedDict
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -17,28 +18,47 @@ from rich.progress import (
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from typing import TypedDict
-from .migration import MigrationInfo, MigrationTool, MigrationsToolError
+from sqlalchemy.exc import ArgumentError, OperationalError
+
+from .migration import MigrationInfo, MigrationsToolError, MigrationTool
 
 log = logging.getLogger(__name__)
 app = typer.Typer(help="Custom SQLAlchemy Migration Tool")
 console = Console()
+ENV_VAR_PREFIX = "MIGRATIONS_TOOL"
 database_url_opt = typer.Option(
     ...,
     "--database-url",
     help="Database connection URL",
-    envvar="WRITER_DATABASE_URI",
+    envvar=f"{ENV_VAR_PREFIX}_DATABASE_URL",
 )
-migrations_dir_opt = typer.Option(
+_migrations_dir_opt = typer.Option(
     "migrations",
     "--migrations-dir",
     help="Migrations directory",
-    envvar="MIGRATIONS_DIR",
+    envvar=f"{ENV_VAR_PREFIX}_DIR",
 )
-database_echo_opt = typer.Option(
+_database_echo_opt = typer.Option(
     default=False,
-    envvar="DATABASE_ECHO",
+    envvar=f"{ENV_VAR_PREFIX}_DATABASE_ECHO",
     help="print all sql stmt executed to stdout",
+)
+_verbose_opt = typer.Option(
+    False,
+    "--verbose",
+    "-v",
+    help="Enable verbose logging",
+    envvar=f"{ENV_VAR_PREFIX}_VERBOSE",
+)
+_log_format_opt = typer.Option(
+    default="%(levelname).1s %(asctime)s.%(msecs)03d - %(processName)s:%(threadName)s - f:%(funcName)s l:%(lineno)s - %(message)s",
+    help="must comply with python stdlib logging module",
+    envvar=f"{ENV_VAR_PREFIX}_LOG_FORMAT",
+)
+_log_level_opt = typer.Option(
+    default="INFO",
+    help="<DEBUG | INFO | WARNING | ERROR>",
+    envvar=f"{ENV_VAR_PREFIX}_LOG_LEVEL",
 )
 
 
@@ -261,23 +281,12 @@ def process_migrations(files: Iterable[str], description: str, size: int) -> lis
 
 @app.callback()
 def main_callback(
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable verbose logging",
-    ),
-    log_format: str = typer.Option(
-        default="%(levelname).1s %(asctime)s.%(msecs)03d - %(processName)s:%(threadName)s - f:%(funcName)s l:%(lineno)s - %(message)s",
-        help="must comply with python stdlib logging module",
-    ),
-    log_level: str = typer.Option(
-        default="INFO",
-        help="<DEBUG | INFO | WARNING | ERROR>",
-    ),
+    verbose: bool = _verbose_opt,
+    log_format: str = _log_format_opt,
+    log_level: str = _log_level_opt,
     database_url: str = database_url_opt,
-    migrations_dir: str = migrations_dir_opt,
-    echo: bool = database_echo_opt,
+    migrations_dir: str = _migrations_dir_opt,
+    echo: bool = _database_echo_opt,
 ):
     """Configure logging before running any command"""
     # Override with verbose flag if set

@@ -20,6 +20,7 @@ db-migrate = "migrations_tool.cli:main"
 
 [tool.pyright]
 typeCheckingMode = "strict"
+include = ["test/**","src/**"]
 
 [dependency-groups]
 dev = [
@@ -27,3 +28,6 @@ dev = [
     'ruff',
     'pyright',
 ]
+
+[tool.ruff]
+include = ["test/**","src/**"]
