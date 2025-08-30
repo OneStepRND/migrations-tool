@@ -27,7 +27,7 @@ jobs:
       run: uv python install ${{ matrix.python-version }}
 
     - name: Run tests
-      run: ./build.sh
+      run: ./test.sh
 
   build-wheel:
     needs: test
