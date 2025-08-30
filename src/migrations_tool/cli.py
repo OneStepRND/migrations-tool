@@ -72,7 +72,8 @@ _config: Config | None = None
 
 
 def get_tool(init: bool = False):
-    assert _config is not None
+    if _config is None:
+        raise RuntimeError("_config not initialized. This shouldn't happen.")
 
     return MigrationTool(
         _config["database_url"],
@@ -303,7 +304,7 @@ def main_callback(
     # Configure logging
     logging.basicConfig(
         stream=sys.stdout,
-        level=logging.getLevelNamesMapping()[log_level],
+        level=logging.getLevelNamesMapping()[log_level.upper().strip()],
         force=True,
         format=log_format,
         datefmt="%Y/%m/%d %H:%M:%S",

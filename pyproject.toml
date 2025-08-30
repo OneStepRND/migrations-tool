@@ -31,3 +31,7 @@ dev = [
 
 [tool.ruff]
 include = ["test/**","src/**"]
+select = ["E", "W", "F", "I", "N", "UP", "B", "S", "C4", "PIE", "RUF"]
+ignore = ["E501"]  # Line too long (let formatter handle it)
+[tool.ruff.lint.isort]
+known-first-party = ["migrations_tool"]
