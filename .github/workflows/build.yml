@@ -99,4 +99,3 @@ jobs:
         prerelease: false
         generate_release_notes: true
         files: dist/*.whl
-        overwrite: true
