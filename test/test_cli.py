@@ -1,9 +1,11 @@
 import tempfile
-import sqlalchemy as sa
-import pytest
 from pathlib import Path
+
+import pytest
+import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 from typer.testing import CliRunner
+
 from migrations_tool.cli import app
 from migrations_tool.migration import MigrationTool
 
@@ -65,7 +67,8 @@ class TestMigrationCommands:
             self.sqlite_db_url,
             "--migrations-dir",
             str(self.temp_migrations_dir),
-        ] + command
+            *command,
+        ]
         return self.runner.invoke(app, full_command)
 
     def generate_migration(self, name: str = "test migration"):

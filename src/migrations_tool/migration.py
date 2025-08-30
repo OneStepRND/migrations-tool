@@ -3,9 +3,9 @@ import logging
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable, NamedTuple
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -56,7 +56,7 @@ def parse_filename(filename: str) -> tuple[datetime, str]:
 
     log.debug(f"Parsed parts - date: {datetime_str} description: {description}")
     created_at = datetime.strptime(datetime_str, DATETIME_FMT)
-    created_at = created_at.replace(tzinfo=timezone.utc)
+    created_at = created_at.replace(tzinfo=UTC)
     log.debug(f"Successfully parsed timestamp: {created_at}")
     return created_at, description
 
@@ -65,7 +65,7 @@ def save_migration_history(filename: str, session: Session):
     log.debug(f"Recording migration execution: {filename})")
     record = MigrationHistory(
         filename=filename,
-        executed_at=datetime.now(timezone.utc),
+        executed_at=datetime.now(UTC),
     )
     session.add(record)
     log.debug(f"Migration execution recorded: {filename}")
@@ -83,14 +83,16 @@ def load_migration_module(filepath: Path) -> MigrationModule:
     """Dynamically load migration module"""
     log.debug(f"Loading migration module from: {filepath}")
     spec = importlib.util.spec_from_file_location("migration", filepath)
-    assert spec is not None, f"failed to create spec for : {filepath}"
+    if spec is None:
+        raise TypeError(f"failed to create spec for : {filepath}")
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None, f"no loader for : {filepath}"
+    if spec.loader is None:
+        raise TypeError(f"no loader for : {filepath}")
+
     spec.loader.exec_module(module)
     log.debug(f"Successfully loaded module: {filepath.name}")
-    assert isinstance(module, MigrationModule), (
-        f"module found at {filepath} does not match protocol"
-    )
+    if not isinstance(module, MigrationModule):
+        raise TypeError(f"module found at {filepath} does not match protocol")
     return module
 
 
@@ -235,7 +237,7 @@ class MigrationTool:
     def generate_migration(self, description: str):
         """Generate a new migration file"""
         log.debug(f"Generating migration with description: {description}")
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
         filename = (
             f"{timestamp.strftime(DATETIME_FMT)}__{description.replace(' ', '_')}.py"
         )
@@ -289,7 +291,7 @@ class MigrationTool:
             MigrationInfo(
                 row.filename,
                 parse_filename(row.filename)[0],
-                row.executed_at.replace(tzinfo=timezone.utc),
+                row.executed_at.replace(tzinfo=UTC),
             )
             for row in rows
         ]

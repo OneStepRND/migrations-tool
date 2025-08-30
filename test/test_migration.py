@@ -1,5 +1,5 @@
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -136,9 +136,7 @@ def test_discover_migrations_with_files(
 def test_generate_migration(migration_tool: MigrationTool):
     """Test generating a new migration"""
     with patch("migrations_tool.migration.datetime") as mock_datetime:
-        mock_datetime.now.return_value = datetime(
-            2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc
-        )
+        mock_datetime.now.return_value = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
         mock_datetime.isoformat = datetime.isoformat
         filename = migration_tool.generate_migration("test migration")
         # Check that file was created
