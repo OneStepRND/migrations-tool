@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.13']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     steps:
     - uses: actions/checkout@v4
@@ -50,8 +50,6 @@ jobs:
         name: wheel
         path: dist/*.whl
 
-
-
   create-release:
     needs: build-wheel
     runs-on: ubuntu-latest
@@ -61,11 +59,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
 
     - name: Determine version
       id: version
       run: |
-        VERSION=$(grep -Po 'version = "\K[^"]+' pyproject.toml)
+        VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Check if tag exists
