@@ -21,12 +21,15 @@ db-migrate = "migrations_tool.cli:main"
 [tool.pyright]
 typeCheckingMode = "strict"
 include = ["test/**","src/**"]
+venvPath = "."
+venv = ".venv"
 
 [dependency-groups]
 dev = [
     'pytest',
     'ruff',
     'pyright',
+    "pre-commit>=4.3.0",
 ]
 
 [tool.ruff]
