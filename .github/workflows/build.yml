@@ -95,7 +95,14 @@ jobs:
       with:
         tag_name: v${{ steps.version.outputs.version }}
         name: Release v${{ steps.version.outputs.version }}
-        draft: false
+        draft: true
         prerelease: false
         generate_release_notes: true
         files: dist/*.whl
+
+    - name: Publish Release
+      if: steps.check_tag.outputs.exists == 'false'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release edit v${{ steps.version.outputs.version }} --draft=false
