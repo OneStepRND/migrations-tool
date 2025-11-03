@@ -210,7 +210,7 @@ def init():
 def pending():
     tool = get_tool()
     files = tool.list_migrations_to_upgrade()
-    typer.echo("\n".join(files))
+    typer.echo("\n".join(files), nl=False)
 
 
 def show_table(items: Iterable[MigrationInfo]):
