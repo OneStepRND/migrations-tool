@@ -18,13 +18,12 @@ from rich.progress import (
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from sqlalchemy.exc import ArgumentError, OperationalError
 
-from .migration import MigrationInfo, MigrationsToolError, MigrationTool
+from .migration import MigrationInfo, MigrationTool
 
 log = logging.getLogger(__name__)
 app = typer.Typer(help="Custom SQLAlchemy Migration Tool")
-console = Console()
+console = Console(stderr=True)
 ENV_VAR_PREFIX = "MIGRATIONS_TOOL"
 database_url_opt = typer.Option(
     ...,
@@ -303,7 +302,7 @@ def main_callback(
 
     # Configure logging
     logging.basicConfig(
-        stream=sys.stdout,
+        stream=sys.stderr,
         level=logging.getLevelNamesMapping()[log_level.upper().strip()],
         force=True,
         format=log_format,
@@ -315,31 +314,9 @@ def main():
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:
         app()
-    except (
-        MigrationsToolError,
-        ArgumentError,
-        OperationalError,
-    ) as e:
-        console.print(
-            Panel(
-                Text(str(e)),
-                title="ERROR",
-                style=Style(color="red", bold=True),
-                expand=False,
-            )
-        )
-        exit(1)
-    except Exception as e:
-        log.exception("unhandled error")
-        console.print(
-            Panel(
-                Text(str(e)),
-                title="ERROR",
-                style=Style(color="red", bold=True),
-                expand=False,
-            )
-        )
-        exit(1)
+    except Exception:
+        console.print_exception(width=None, show_locals=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -244,15 +244,18 @@ class MigrationTool:
         filepath = self.migrations_dir / filename
         log.debug(f"Generated migration: {filepath}")
         filepath.write_text(
-            textwrap.dedent("""
+            textwrap.dedent(
+                """
             import sqlalchemy as sa
             from sqlalchemy.orm import Session
 
             def upgrade(session: Session):
-                    pass
+                session.execute(sa.text(''))
 
             def downgrade(session: Session):
-                    pass""")
+                session.execute(sa.text(''))
+            """
+            )
         )
         return filepath
 
