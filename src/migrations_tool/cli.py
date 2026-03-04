@@ -2,6 +2,7 @@ import logging
 import signal
 import sys
 from collections.abc import Iterable
+from pathlib import Path
 from typing import TypedDict
 
 import typer
@@ -26,10 +27,16 @@ app = typer.Typer(help="Custom SQLAlchemy Migration Tool")
 console = Console(stderr=True)
 ENV_VAR_PREFIX = "MIGRATIONS_TOOL"
 database_url_opt = typer.Option(
-    ...,
+    None,
     "--database-url",
     help="Database connection URL",
     envvar=f"{ENV_VAR_PREFIX}_DATABASE_URL",
+)
+_database_url_file_opt = typer.Option(
+    None,
+    "--database-url-file",
+    help="Path to a file containing the database connection URL",
+    envvar=f"{ENV_VAR_PREFIX}_DATABASE_URL_FILE",
 )
 _migrations_dir_opt = typer.Option(
     "migrations",
@@ -284,7 +291,8 @@ def main_callback(
     verbose: bool = _verbose_opt,
     log_format: str = _log_format_opt,
     log_level: str = _log_level_opt,
-    database_url: str = database_url_opt,
+    database_url: str | None = database_url_opt,
+    database_url_file: str | None = _database_url_file_opt,
     migrations_dir: str = _migrations_dir_opt,
     echo: bool = _database_echo_opt,
 ):
@@ -292,6 +300,15 @@ def main_callback(
     # Override with verbose flag if set
     if verbose:
         log_level = "DEBUG"
+
+    if database_url_file and not database_url:
+        database_url = Path(database_url_file).read_text().strip()
+
+    if not database_url:
+        console.print(
+            "[red]Error:[/red] --database-url or --database-url-file is required"
+        )
+        raise typer.Exit(code=1)
 
     global _config
     _config = {
