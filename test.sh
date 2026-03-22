@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
-uv sync --frozen --dev
+uv sync --frozen --dev --extra=clickhouse
 uv run pyright
 uv run ruff check
 uv run ruff format --check
