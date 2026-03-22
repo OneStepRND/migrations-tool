@@ -33,9 +33,19 @@ class MigrationModule(Protocol):
         pass
 
 
+def _get_history_table_args() -> tuple[Any, ...]:
+    try:
+        from clickhouse_connect.cc_sqlalchemy.ddl.tableengine import ReplacingMergeTree
+
+        return (ReplacingMergeTree(order_by="filename"),)
+    except ImportError:
+        return ()
+
+
 @dataclass
 class MigrationHistory(Base):
     __tablename__ = "migration_history"
+    __table_args__ = _get_history_table_args()
     filename: Mapped[str] = mapped_column(sa.String(256), primary_key=True)
     executed_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
@@ -249,11 +259,14 @@ class MigrationTool:
             import sqlalchemy as sa
             from sqlalchemy.orm import Session
 
+            def get_inspector(session:Session) -> sa.Inspector:
+                return sa.inspect(session.connection())
+
             def upgrade(session: Session):
-                session.execute(sa.text(''))
+                pass
 
             def downgrade(session: Session):
-                session.execute(sa.text(''))
+                pass
             """
             )
         )

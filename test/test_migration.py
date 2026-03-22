@@ -7,7 +7,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from migrations_tool.migration import MigrationTool, parse_filename
+from migrations_tool.migration import MigrationHistory, MigrationTool, parse_filename
 
 
 @pytest.fixture
@@ -409,3 +409,17 @@ def downgrade(engine): pass
 
     # If executed in correct order, both operations should succeed
     assert migration_tool.list_applied_migration_files() == [filename1, filename2]
+
+
+def test_history_table_has_clickhouse_engine():
+    """Test that MigrationHistory has the ReplacingMergeTree engine from clickhouse-connect."""
+    from clickhouse_connect.cc_sqlalchemy.ddl.tableengine import ReplacingMergeTree
+
+    engines = [
+        arg
+        for arg in MigrationHistory.__table_args__
+        if isinstance(arg, ReplacingMergeTree)
+    ]
+    assert len(engines) == 1
+    assert "ReplacingMergeTree" in engines[0].compile()
+    assert "ORDER BY filename" in engines[0].compile()
