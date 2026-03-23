@@ -83,8 +83,10 @@ def save_migration_history(filename: str, session: Session):
 
 
 def delete_migration_history(filename: str, session: Session):
+    table = MigrationHistory.__tablename__
     session.execute(
-        sa.delete(MigrationHistory).where(MigrationHistory.filename == filename)
+        sa.text(f"DELETE FROM {table} WHERE filename = :filename"),  # noqa: S608
+        {"filename": filename},
     )
     return filename
 
