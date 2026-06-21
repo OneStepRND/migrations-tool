@@ -204,7 +204,7 @@ def init():
     _ = list(tool.lazy_execute(tool.list_migrations_to_upgrade(), upgrade=True))
     console.print(
         Panel(
-            Text("init called created table `migration_history`"),
+            Text("init called created tables `migration_history` and `schema_hash`"),
             title="Completed",
             style="green",
             expand=False,
@@ -217,6 +217,55 @@ def pending():
     tool = get_tool()
     files = tool.list_migrations_to_upgrade()
     typer.echo("\n".join(files), nl=False)
+
+
+@app.command(help="output to stdout the cumulative schema hash stored in the DB")
+def hash():
+    tool = get_tool()
+    typer.echo(tool.get_schema_hash(), color=False)
+
+
+@app.command(
+    help="verify the DB is up to date with the migrations directory; "
+    "optionally compare the stored hash against a known --expected value"
+)
+def verify(
+    expected: str | None = typer.Option(
+        None,
+        "--expected",
+        help="a known schema hash to assert the DB matches",
+    ),
+):
+    tool = get_tool()
+    stored = tool.get_schema_hash()
+    expected_local = tool.compute_expected_hash()
+    pending_files = tool.list_migrations_to_upgrade()
+    drift = tool.find_drift()
+
+    up_to_date = stored == expected_local and not pending_files and not drift
+    matches_expected = expected is None or stored == expected
+    ok = up_to_date and matches_expected
+
+    lines = [
+        f"stored hash:   {stored}",
+        f"expected hash: {expected_local}",
+    ]
+    if expected is not None:
+        lines.append(f"known hash:    {expected}")
+    if pending_files:
+        lines.append(f"pending:       {len(pending_files)} migration(s) not applied")
+    if drift:
+        lines.append(f"drift:         {', '.join(drift)}")
+
+    console.print(
+        Panel(
+            Text("\n".join(lines)),
+            title="up to date" if ok else "out of date",
+            style=Style(color="green" if ok else "red"),
+            expand=False,
+        )
+    )
+    raise typer.Exit(0 if ok else 1)
 
 
 def show_table(items: Iterable[MigrationInfo]):

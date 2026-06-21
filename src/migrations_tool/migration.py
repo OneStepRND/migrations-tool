@@ -1,7 +1,8 @@
+import hashlib
 import importlib.util
 import logging
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,45 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 log = logging.getLogger(__name__)
 DATETIME_FMT = "%Y%m%d_%H%M_%S%f"
+
+# Pinned primary key of the single-row schema_hash table.
+SCHEMA_HASH_ROW_ID = 1
+# Tip value for a database with no applied migrations.
+GENESIS_HASH = hashlib.sha256(b"").hexdigest()
+
+
+def normalize_content(raw: bytes) -> bytes:
+    """Normalize line endings so the same file hashes identically regardless of
+    the platform/git checkout that produced it (CRLF/CR -> LF)."""
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def compute_content_hash(raw: bytes) -> str:
+    """Hash of a single migration file's contents."""
+    return hashlib.sha256(normalize_content(raw)).hexdigest()
+
+
+def compute_chain_hash(prev_chain: str, filename: str, content_hash: str) -> str:
+    """Fold one migration into the running chain (git-commit style)."""
+    h = hashlib.sha256()
+    h.update(prev_chain.encode())
+    h.update(b"\0")
+    h.update(filename.encode())
+    h.update(b"\0")
+    h.update(content_hash.encode())
+    return h.hexdigest()
+
+
+def compute_tip(rows: Iterable[tuple[str, str | None]]) -> str:
+    """Cumulative chain hash over (filename, content_hash) pairs.
+
+    `rows` MUST be supplied in sorted-filename order so the tip is independent of
+    the order migrations were physically applied (i.e. holes filled later still
+    yield the same value a fresh checkout would compute)."""
+    tip = GENESIS_HASH
+    for filename, content_hash in rows:
+        tip = compute_chain_hash(tip, filename, content_hash or "")
+    return tip
 
 
 class MigrationsToolError(Exception):
@@ -42,12 +82,44 @@ def _get_history_table_args() -> tuple[Any, ...]:
         return ()
 
 
+def _get_schema_hash_table_args() -> tuple[Any, ...]:
+    try:
+        from clickhouse_connect.cc_sqlalchemy.ddl.tableengine import ReplacingMergeTree
+
+        return (ReplacingMergeTree(order_by="id"),)
+    except ImportError:
+        return ()
+
+
 @dataclass
 class MigrationHistory(Base):
     __tablename__ = "migration_history"
     __table_args__ = _get_history_table_args()
     filename: Mapped[str] = mapped_column(sa.String(256), primary_key=True)
     executed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+    )
+    # sha256 of this migration's file contents at the time it was applied.
+    # Nullable so databases created before this column existed can be backfilled.
+    content_hash: Mapped[str | None] = mapped_column(
+        sa.String(64),
+        nullable=True,
+        default=None,
+    )
+
+
+@dataclass
+class SchemaHash(Base):
+    """Single-row table holding the cumulative chain hash of all applied
+    migrations. Cheap to read (`SELECT hash FROM schema_hash`) for consumers that
+    only need to know whether the DB is up to date or matches a known value."""
+
+    __tablename__ = "schema_hash"
+    __table_args__ = _get_schema_hash_table_args()
+    id: Mapped[int] = mapped_column(sa.Integer, primary_key=True)
+    hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
         nullable=False,
     )
@@ -69,26 +141,6 @@ def parse_filename(filename: str) -> tuple[datetime, str]:
     created_at = created_at.replace(tzinfo=UTC)
     log.debug(f"Successfully parsed timestamp: {created_at}")
     return created_at, description
-
-
-def save_migration_history(filename: str, session: Session):
-    log.debug(f"Recording migration execution: {filename})")
-    record = MigrationHistory(
-        filename=filename,
-        executed_at=datetime.now(UTC),
-    )
-    session.add(record)
-    log.debug(f"Migration execution recorded: {filename}")
-    return record
-
-
-def delete_migration_history(filename: str, session: Session):
-    table = MigrationHistory.__tablename__
-    session.execute(
-        sa.text(f"DELETE FROM {table} WHERE filename = :filename"),  # noqa: S608
-        {"filename": filename},
-    )
-    return filename
 
 
 def load_migration_module(filepath: Path) -> MigrationModule:
@@ -147,6 +199,168 @@ class MigrationTool:
         if should_create_history_table:
             create_history_table(self.engine)
         assert_history_table_exists(self.engine)
+        # Bring the meta tables (content_hash column, schema_hash table) up to
+        # date on any connection — this self-migrates databases initialized by
+        # older versions of the tool that predate the hashing feature.
+        self.ensure_meta_schema()
+
+    @property
+    def _is_clickhouse(self) -> bool:
+        return self.engine.dialect.name.startswith("clickhouse")
+
+    def ensure_meta_schema(self):
+        """Idempotently migrate the tool's own bookkeeping tables and (re)seed
+        the cumulative hash. Cheap when nothing is missing (metadata reads only)."""
+        inspector = sa.inspect(self.engine)
+        columns = {
+            c["name"] for c in inspector.get_columns(MigrationHistory.__tablename__)
+        }
+        if "content_hash" not in columns:
+            log.info("migrating meta schema: adding migration_history.content_hash")
+            with self.engine.begin() as conn:
+                conn.execute(
+                    sa.text(
+                        f"ALTER TABLE {MigrationHistory.__tablename__} "
+                        f"ADD COLUMN content_hash VARCHAR(64)"
+                    )
+                )
+
+        if not inspector.has_table(SchemaHash.__tablename__):
+            log.info("migrating meta schema: creating schema_hash table")
+            SchemaHash.__table__.create(self.engine)
+
+        self._backfill_and_seed_hash()
+
+    def _backfill_and_seed_hash(self):
+        """Fill in content_hash for rows recorded before the column existed (from
+        current file contents) and (re)write the cumulative tip."""
+        with self.Session.begin() as session:
+            # In-place UPDATE is unsupported on ClickHouse (ReplacingMergeTree) and
+            # re-inserting would leave transient duplicate rows that corrupt the
+            # tip; ClickHouse support postdates this feature, so legacy rows there
+            # simply keep a NULL content_hash.
+            if not self._is_clickhouse:
+                rows = (
+                    session.execute(
+                        sa.select(MigrationHistory).order_by(MigrationHistory.filename)
+                    )
+                    .scalars()
+                    .all()
+                )
+                for row in rows:
+                    if row.content_hash is not None:
+                        continue
+                    path = self.migrations_dir / row.filename
+                    if path.exists():
+                        row.content_hash = compute_content_hash(path.read_bytes())
+                    else:
+                        log.warning(
+                            f"cannot backfill content_hash for applied migration "
+                            f"`{row.filename}`: file is missing from "
+                            f"{self.migrations_dir}"
+                        )
+            self._update_tip(session)
+
+    def _update_tip(self, session: Session):
+        """Recompute the cumulative chain hash from the applied rows (sorted) and
+        store it in the single-row schema_hash table. Uses stored content_hash
+        values, so already-applied migration files are never re-read here.
+
+        The row is replaced with a raw DELETE + INSERT rather than an in-place
+        ORM UPDATE: ClickHouse (ReplacingMergeTree) has no in-place UPDATE, and
+        reading the current value via a plain query keeps it out of the ORM
+        identity map so re-inserting the same primary key does not conflict."""
+        rows = session.execute(
+            sa.select(
+                MigrationHistory.filename, MigrationHistory.content_hash
+            ).order_by(MigrationHistory.filename)
+        ).all()
+        tip = compute_tip((r.filename, r.content_hash) for r in rows)
+
+        table = SchemaHash.__tablename__
+        current = session.execute(
+            sa.text(f"SELECT hash FROM {table} WHERE id = :id"),  # noqa: S608
+            {"id": SCHEMA_HASH_ROW_ID},
+        ).scalar()
+        if current == tip:
+            return
+
+        session.execute(
+            sa.text(f"DELETE FROM {table} WHERE id = :id"),  # noqa: S608
+            {"id": SCHEMA_HASH_ROW_ID},
+        )
+        session.flush()
+        session.add(
+            SchemaHash(id=SCHEMA_HASH_ROW_ID, hash=tip, updated_at=datetime.now(UTC))
+        )
+        session.flush()
+        log.debug(f"schema hash tip updated to {tip}")
+
+    def save_migration_history(self, filename: str, session: Session):
+        log.debug(f"Recording migration execution: {filename})")
+        content_hash = compute_content_hash(
+            (self.migrations_dir / filename).read_bytes()
+        )
+        record = MigrationHistory(
+            filename=filename,
+            executed_at=datetime.now(UTC),
+            content_hash=content_hash,
+        )
+        session.add(record)
+        session.flush()
+        self._update_tip(session)
+        log.debug(f"Migration execution recorded: {filename}")
+        return record
+
+    def delete_migration_history(self, filename: str, session: Session):
+        # Raw SQL DELETE so ClickHouse (which has no ORM-style DELETE) is supported.
+        table = MigrationHistory.__tablename__
+        session.execute(
+            sa.text(f"DELETE FROM {table} WHERE filename = :filename"),  # noqa: S608
+            {"filename": filename},
+        )
+        session.flush()
+        self._update_tip(session)
+        return filename
+
+    def get_schema_hash(self) -> str:
+        """The cumulative chain hash stored in the DB (cheap, single row)."""
+        with self.Session.begin() as session:
+            row = session.get(SchemaHash, SCHEMA_HASH_ROW_ID)
+            return row.hash if row is not None else GENESIS_HASH
+
+    def compute_expected_hash(self) -> str:
+        """Chain hash computed over the migration files currently on disk (sorted).
+        Equals get_schema_hash() iff the DB has applied exactly those files with
+        matching contents."""
+        return compute_tip(
+            (
+                filename,
+                compute_content_hash((self.migrations_dir / filename).read_bytes()),
+            )
+            for filename in self.list_existing_migration_files()
+        )
+
+    def is_up_to_date(self) -> bool:
+        return self.get_schema_hash() == self.compute_expected_hash()
+
+    def find_drift(self) -> list[str]:
+        """Applied migrations whose on-disk content no longer matches what was
+        recorded when they were applied (or whose file is now missing)."""
+        with self.Session.begin() as session:
+            rows = session.execute(
+                sa.select(MigrationHistory.filename, MigrationHistory.content_hash)
+            ).all()
+        drifted: list[str] = []
+        for filename, stored in sorted(rows):
+            path = self.migrations_dir / filename
+            if not path.exists():
+                drifted.append(filename)
+            elif (
+                stored is not None and compute_content_hash(path.read_bytes()) != stored
+            ):
+                drifted.append(filename)
+        return drifted
 
     def load(self, filename: str):
         return load_migration_module(self.migrations_dir / filename)
@@ -224,7 +438,9 @@ class MigrationTool:
         return migrations
 
     def lazy_execute(self, files: list[str], upgrade: bool):
-        db_update = save_migration_history if upgrade else delete_migration_history
+        db_update = (
+            self.save_migration_history if upgrade else self.delete_migration_history
+        )
         log.debug(f"starting {upgrade=} for {len(files)}")
 
         for file in files:
