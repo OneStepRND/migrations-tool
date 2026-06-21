@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, Protocol, runtime_checkable
+from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -227,7 +227,8 @@ class MigrationTool:
 
         if not inspector.has_table(SchemaHash.__tablename__):
             log.info("migrating meta schema: creating schema_hash table")
-            SchemaHash.__table__.create(self.engine)
+            schema_hash_table = cast(sa.Table, SchemaHash.__table__)
+            schema_hash_table.create(self.engine, checkfirst=True)
 
         self._backfill_and_seed_hash()
 
